@@ -1,7 +1,6 @@
 [project]
 name = "llm-zoomcamp-code-vector-search"
 version = "0.1.0"
-description = "Add your description here"
 description = "Small playground for FAQ search with keyword and vector retrieval"
 readme = "README.md"
 requires-python = ">=3.12"
