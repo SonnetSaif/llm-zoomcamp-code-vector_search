@@ -1,113 +1,179 @@
-## FAQ Search Playground
+﻿## FAQ Vector Search Playground
 
-This repo is a small work-in-progress project for trying out search over the
-DataTalks.Club FAQ data.
+This repo explores vector search and RAG (Retrieval-Augmented Generation) over the
+DataTalks.Club course FAQ data. It covers multiple vector-search backends — from a
+pure in-memory NumPy approach all the way to persistent SQLite and PostgreSQL — and
+wraps them all in a reusable RAG pipeline. A separate orchestration layer shows the
+same patterns implemented as Kestra workflows.
 
-Right now, the project has two main pieces:
+---
 
-- a small ingestion helper that downloads FAQ documents and can build a simple
-  text index with `minsearch`
-- a notebook where the FAQ entries are turned into embeddings with
-  `sentence-transformers` and searched with plain vector similarity
+## Start here
 
-So this is already beyond an empty scaffold, but it is still an experiment
-more than a finished app.
+**[`00_pipeline.ipynb`](00_pipeline.ipynb)** is the master notebook. It runs the full
+pipeline from end to end, explains how every file fits together, and produces the
+shared objects (`model`, `documents`, `vectors`, `X`) that the focused notebooks depend
+on. Open it first.
 
-## What is already done
+---
 
-### 1. FAQ data loading
+## Sequential file map
 
-`ingest.py` fetches the course FAQ catalog from DataTalks.Club, follows each
-course path, and combines all FAQ entries into one Python list of documents.
+| # | File / folder | Purpose |
+|---|---------------|---------|
+| 0 | `pyproject.toml` / `.python-version` | Project metadata and locked Python version |
+| 1 | `ingest.py` | Download FAQ data; build minsearch keyword index |
+| 2 | `embeddings.ipynb` | **Core exploration**: model loading, dot-product similarity, batch encoding, NumPy top-k, minsearch VectorSearch, SQLite VectorSearchIndex, RAG demos |
+| 3 | `minsearch-vector.ipynb` | Focused look at `minsearch.VectorSearch` — needs `X` and `documents` from Stage 2 |
+| 4 | `rag_helper.py` | `RAGBase` class: search → context → prompt → LLM stream |
+| 5 | `rag-vector.ipynb` | RAG pipeline wired to a `VectorSearch` index — needs `X` and `documents` from Stage 2 |
+| 6 | `sqlitesearch-vector.ipynb` | Open the persisted `faq_vectors2.db` and run SQLite-backed RAG |
+| 7 | `pgvector-vector.ipynb` | PostgreSQL + pgvector backend; HNSW index; pgvector RAG |
+| 8 | `main.py` | Minimal CLI entry-point placeholder |
+| 9 | `orchestration/` | Kestra workflow orchestration: docker-compose, 6 YAML flows, 9 lesson notes |
 
-Each document is expected to contain fields such as:
+### Dependency graph
 
-- `question`
-- `answer`
-- `section`
-- `course`
-
-### 2. A basic searchable index
-
-`ingest.py` also includes a `build_index(documents)` helper built on top of
-`minsearch`.
-
-The index is configured with:
-
-- text fields: `question`, `section`, `answer`
-- keyword field: `course`
-
-That gives the project a simple non-vector search layer for the FAQ data.
-
-### 3. Embedding experiment in the notebook
-
-`demo.ipynb` is where most of the current exploration happens.
-
-At the moment the notebook:
-
-1. loads the `all-MiniLM-L6-v2` sentence-transformer model
-2. encodes sample questions and answers
-3. downloads the FAQ data through `load_faq_data()`
-4. builds text strings from each FAQ entry
-5. creates embeddings in batches
-6. stores them in a NumPy array
-7. scores a query against all stored vectors with a dot product
-8. prints the best matching FAQ entries
-
-In short: the vector-search idea is already being tested end to end in the
-notebook.
-
-## Project structure
-
-```text
-.
-|-- demo.ipynb      # embedding and similarity-search experiments
-|-- ingest.py       # FAQ download + index-building helpers
-|-- main.py         # tiny placeholder entry point
-|-- pyproject.toml  # project metadata and dependencies
-|-- uv.lock         # locked dependency versions
+```
+ingest.py
+    └── documents, index
+            │
+            ▼
+    embeddings.ipynb  ──────────────────────────────────────────┐
+    (model, vectors, X)                                         │
+            │                                                   │
+     ┌──────┴──────────────────────┐                           │
+     ▼                             ▼                           │
+minsearch-vector.ipynb    sqlitesearch-vector.ipynb            │
+  (needs X, documents)      (needs faq_vectors2.db)            │
+     │                                                         │
+     ▼                                                         │
+rag_helper.py  ◄───────────────────────────────────────────────┘
+(RAGBase)                    pgvector-vector.ipynb
+     │                         (standalone, needs Postgres)
+     ▼
+rag-vector.ipynb
+  (needs X, documents)
 ```
 
-## Dependencies in use
+The `orchestration/` folder is independent — it uses Kestra to orchestrate similar
+RAG and agent patterns via YAML flows rather than Python notebooks.
 
-The project is set up for Python 3.12 and currently includes packages such as:
+---
 
-- `requests` for downloading FAQ data
-- `minsearch` for a lightweight keyword index
-- `sentence-transformers` for embeddings
-- `numpy` and `jupyter` for notebook work
+## What each file does
 
-There are also dependencies like `openai`, `ollama`, and `python-dotenv`
-already listed, but they are not wired into the Python files yet.
+### `ingest.py`
+Fetches the DataTalks.Club FAQ catalog, follows each course path, and returns a flat
+list of documents with `question`, `answer`, `section`, and `course` fields. Also
+exposes `build_index(documents)` for a lightweight minsearch keyword index.
 
-## How to run it
+### `embeddings.ipynb`
+The main exploration notebook. Covers:
+1. Loading `all-MiniLM-L6-v2` from `sentence-transformers`
+2. Encoding individual texts and computing dot-product similarity
+3. Batch encoding all FAQs → NumPy array `X`
+4. Manual top-k retrieval with `np.argsort`
+5. `minsearch.VectorSearch` with keyword filtering
+6. `sqlitesearch.VectorSearchIndex` (writes `faq_vectors2.db`)
+7. `RAGVector` subclass wired to Ollama
 
-If you are using `uv`:
+### `minsearch-vector.ipynb`
+Short focused demo of `minsearch.VectorSearch`. Expects `X` and `documents` to
+already be defined — run `00_pipeline.ipynb` or `embeddings.ipynb` first.
+
+### `rag_helper.py`
+Defines `RAGBase`: a reusable RAG class that any vector backend can extend by
+overriding `search()`. All other notebooks import from here.
+
+### `rag-vector.ipynb`
+Subclasses `RAGBase` to use the minsearch `VectorSearch` index. Requires `X` and
+`documents` from Stage 2, plus an LLM client configured via `.env`.
+
+### `sqlitesearch-vector.ipynb`
+Opens the persisted `faq_vectors2.db` (built in `embeddings.ipynb`) and runs
+SQLite-backed vector search RAG with Ollama.
+
+### `pgvector-vector.ipynb`
+Standalone notebook for the PostgreSQL backend. Re-encodes all FAQs, stores them in
+a `documents` table with an `embedding vector(384)` column, creates an HNSW cosine
+index, and defines `RAGPgVector`. Requires a running Postgres instance with the
+`pgvector` extension.
+
+### `main.py`
+The `.py` equivalent of `00_pipeline.ipynb`. Runs the same five stages — ingest,
+embed, vector index, search, and optional RAG — as a command-line script:
 
 ```bash
-uv sync
-uv run python main.py
-uv run jupyter notebook
+# Vector search (no LLM needed)
+uv run python main.py --query "Can I still join after the start date?"
+
+# Full RAG answer (needs OLLAMA_API_KEY or OPENAI_API_KEY in .env)
+uv run python main.py --query "Can I still join after the start date?" --rag
+
+# Filter to one course, show 10 results
+uv run python main.py --query "How do I install Docker?" --course mlops-zoomcamp --top-k 10
 ```
 
-If you prefer plain `pip`, install the dependencies from `pyproject.toml` in
-your usual environment and then open the notebook or run the Python files.
+### `orchestration/`
+Kestra-based orchestration layer:
+- `docker-compose.yml` — starts Kestra + Postgres (UI at `http://localhost:8080`)
+- `flows/1_chat_without_rag.yaml` — baseline LLM query with no context
+- `flows/2_chat_with_rag.yaml` — RAG via Gemini embedding store
+- `flows/3_rag_with_websearch.yaml` — RAG via live Tavily web search
+- `flows/4_simple_agent.yaml` — parameterised summarisation agent with token tracking
+- `flows/5_web_research_agent.yaml` — agent with web-search tool
+- `flows/6_multi_agent_research.yaml` — multi-agent collaboration
+- `lessons/` — nine markdown notes (`01-intro.md` … `09-next-steps.md`)
 
-## Current state
+---
 
-This repo currently looks like an early-stage vector search lab:
+## How to run
 
-- data ingestion is in place
-- a basic keyword index helper exists
-- embedding-based retrieval is working in the notebook
-- a polished CLI or app interface has not been built yet
+```bash
+# Install dependencies
+uv sync
 
-## Good next steps
+# Open the master pipeline notebook
+uv run jupyter notebook 00_pipeline.ipynb
 
-If you continue this project, the most natural next moves would be:
+# Or open an individual focused notebook
+uv run jupyter notebook embeddings.ipynb
 
-- move the notebook logic into reusable Python functions
-- save embeddings instead of recomputing them every session
-- add a proper search function that returns the top-k results
-- compare keyword search vs vector search on the same queries
-- plug the retrieval step into an LLM-based Q&A flow
+# Vector search via CLI (no Jupyter needed)
+uv run python main.py --query "Can I still join after the start date?"
+
+# Full RAG answer
+uv run python main.py --query "Can I still join after the start date?" --rag
+
+# Start the Kestra orchestration layer
+cd orchestration && docker compose up -d
+```
+
+### Environment variables (`.env` at project root)
+
+```
+OLLAMA_API_KEY=<your-key>
+OPENAI_API_KEY=<your-key>
+# For orchestration/docker-compose.yml:
+SECRET_GEMINI_API_KEY=<your-key>
+SECRET_TAVILY_API_KEY=<your-key>
+SECRET_GROQ_API_KEY=<your-key>
+```
+
+---
+
+## Dependencies
+
+Python 3.12. Key packages (see `pyproject.toml`):
+
+| Package | Used for |
+|---------|----------|
+| `requests` | Downloading FAQ data |
+| `minsearch` | Keyword index + in-memory `VectorSearch` |
+| `sentence-transformers` | `all-MiniLM-L6-v2` embedding model |
+| `sqlitesearch` | Persistent SQLite vector index |
+| `psycopg` | PostgreSQL client for pgvector backend |
+| `openai` / `ollama` | LLM inference in the RAG pipeline |
+| `python-dotenv` | Loading API keys from `.env` |
+| `numpy` / `jupyter` | Notebook computing |
