@@ -1,0 +1,70 @@
+id: 7_conversational_agent_with_memory
+namespace: zoomcamp
+
+description: |
+  This flow demonstrates an AI agent with persistent conversational memory.
+  The agent remembers previous exchanges within a named thread, enabling
+  natural multi-turn conversations without the user having to repeat context.
+
+  Key concepts:
+  - Persistent memory via Kestra KV Store (keyed by conversation_id)
+  - Web search keeps answers grounded in current information
+  - Memory IDs isolate separate conversation threads
+
+  Run this flow twice with the same conversation_id — on the second run,
+  ask a follow-up question and watch the agent refer to the earlier exchange.
+  Change conversation_id to start a completely fresh thread.
+
+  Compare with 3_rag_with_websearch.yaml (no memory — stateless) to see
+  what changes when you add persistent state.
+
+inputs:
+  - id: user_message
+    type: STRING
+    displayName: Your message
+    defaults: "Tell me about the latest Kestra features and what makes them useful."
+
+  - id: conversation_id
+    type: STRING
+    displayName: Conversation ID (reuse the same ID to continue a thread)
+    defaults: "kestra-assistant-thread-1"
+
+tasks:
+  - id: conversational_agent
+    type: io.kestra.plugin.ai.agent.AIAgent
+    description: Conversational assistant with web search and persistent memory
+    provider:
+      type: io.kestra.plugin.ai.provider.GoogleGemini
+      modelName: gemini-2.5-flash
+      apiKey: "{{ secret('GEMINI_API_KEY') }}"
+    memory:
+      type: io.kestra.plugin.ai.memory.KestraKVStore
+      memoryId: "{{ inputs.conversation_id }}"
+    systemMessage: |
+      You are a knowledgeable Kestra assistant. Use the TavilyWebSearch retriever
+      to look up current information when needed.
+      Maintain conversation continuity: reference earlier messages in this thread
+      when the user asks follow-up questions.
+      Keep responses concise, factual, and helpful.
+    prompt: "{{ inputs.user_message }}"
+    contentRetrievers:
+      - type: io.kestra.plugin.ai.retriever.TavilyWebSearch
+        apiKey: "{{ secret('TAVILY_API_KEY') }}"
+        maxResults: 5
+
+  - id: log_response
+    type: io.kestra.plugin.core.log.Log
+    message: |
+      💬 Conversation thread: {{ inputs.conversation_id }}
+      👤 You: {{ inputs.user_message }}
+
+      🤖 Assistant:
+      {{ outputs.conversational_agent.textOutput }}
+
+      📊 Token usage: {{ outputs.conversational_agent.tokenUsage.totalTokenCount }} tokens
+
+      💡 Run this flow again with the same conversation_id to continue
+         the conversation. The agent will remember this exchange!
+      💡 Change conversation_id to start a fresh thread with no prior context.
+      💡 Compare with 3_rag_with_websearch.yaml (stateless) to see the
+         difference memory makes for follow-up questions.

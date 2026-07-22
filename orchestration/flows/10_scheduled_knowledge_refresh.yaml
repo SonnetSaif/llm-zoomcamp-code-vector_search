@@ -1,0 +1,81 @@
+id: 10_scheduled_knowledge_refresh
+namespace: zoomcamp
+
+description: |
+  This flow demonstrates scheduled, automated knowledge-base maintenance.
+  It re-ingests documentation on a weekly schedule so your RAG embeddings
+  always reflect the latest content, then runs a smoke test to verify the
+  refresh succeeded before the next production query lands.
+
+  Key concepts:
+  - Schedule triggers for automated, hands-off operation
+  - Smoke testing after ingestion to catch silent failures early
+  - Multi-source ingestion to keep a richer knowledge base
+
+  The weekly schedule is disabled by default so you can run the flow manually
+  first. Enable it by setting disabled: false on the schedule trigger, or by
+  activating it from the Kestra UI.
+
+  After a successful refresh, run 9_llm_evaluation.yaml to verify that
+  answer quality has not regressed.
+
+tasks:
+  - id: ingest_kestra_releases
+    type: io.kestra.plugin.ai.rag.IngestDocument
+    description: Re-ingest Kestra release blog posts (1.0 and 1.1)
+    provider:
+      type: io.kestra.plugin.ai.provider.GoogleGemini
+      modelName: gemini-embedding-001
+      apiKey: "{{ secret('GEMINI_API_KEY') }}"
+    embeddings:
+      type: io.kestra.plugin.ai.embeddings.KestraKVStore
+    drop: true
+    fromExternalURLs:
+      - https://raw.githubusercontent.com/kestra-io/docs/refs/heads/main/src/contents/blogs/release-1-1/index.md
+      - https://raw.githubusercontent.com/kestra-io/docs/refs/heads/main/src/contents/blogs/release-1-0/index.md
+
+  - id: smoke_test
+    type: io.kestra.plugin.ai.rag.ChatCompletion
+    description: Smoke test — verify the refreshed store can answer a known question
+    chatProvider:
+      type: io.kestra.plugin.ai.provider.GoogleGemini
+      modelName: gemini-2.5-flash
+      apiKey: "{{ secret('GEMINI_API_KEY') }}"
+    embeddingProvider:
+      type: io.kestra.plugin.ai.provider.GoogleGemini
+      modelName: gemini-embedding-001
+      apiKey: "{{ secret('GEMINI_API_KEY') }}"
+    embeddings:
+      type: io.kestra.plugin.ai.embeddings.KestraKVStore
+    systemMessage: |
+      You are a quality assurance assistant. Respond in exactly one sentence.
+    prompt: "What is Kestra and what was the headline feature of the 1.1 release?"
+
+  - id: log_refresh_report
+    type: io.kestra.plugin.core.log.Log
+    message: |
+      🔄 Knowledge Base Refresh Complete
+      ====================================
+      ⏰ Completed at: {{ now() }}
+
+      📚 Sources re-ingested:
+         - kestra-io/docs: release-1-1/index.md
+         - kestra-io/docs: release-1-0/index.md
+
+      ✅ Smoke test response:
+      {{ outputs.smoke_test.textOutput }}
+
+      📊 Smoke test tokens: {{ outputs.smoke_test.tokenUsage.totalTokenCount }}
+
+      💡 If the smoke test answer looks wrong or vague, inspect the ingest step
+         logs. The most common cause is a 404 on a source URL — update
+         fromExternalURLs when documentation moves.
+      💡 Run 9_llm_evaluation.yaml after this flow to confirm answer quality
+         has not regressed since the last refresh.
+
+triggers:
+  - id: weekly_refresh
+    type: io.kestra.plugin.core.trigger.Schedule
+    cron: "0 2 * * 1"
+    description: Refresh the knowledge base every Monday at 02:00 UTC
+    disabled: true

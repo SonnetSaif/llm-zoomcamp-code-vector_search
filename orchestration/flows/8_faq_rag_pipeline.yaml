@@ -1,0 +1,88 @@
+id: 8_faq_rag_pipeline
+namespace: zoomcamp
+
+description: |
+  This flow builds a RAG pipeline over DataTalks.Club LLM Zoomcamp course materials —
+  the same dataset used throughout this repository (see ingest.py, embeddings.ipynb).
+
+  It demonstrates:
+  - Ingesting public course documentation from GitHub
+  - Answering student questions grounded in real course materials
+  - Side-by-side comparison of answers with and without RAG context
+
+  This is the Kestra-orchestrated equivalent of the Python RAG pipeline in
+  rag-vector.ipynb and rag_helper.py at the root of this repository.
+
+  Run 1_chat_without_rag.yaml first to understand why context matters,
+  then run this flow to see domain-specific RAG in action.
+
+inputs:
+  - id: student_question
+    type: STRING
+    displayName: Student course question
+    defaults: "Can I still join the course after the start date?"
+
+tasks:
+  - id: baseline_answer
+    type: io.kestra.plugin.ai.completion.ChatCompletion
+    description: Answer without any course context (baseline)
+    provider:
+      type: io.kestra.plugin.ai.provider.GoogleGemini
+      modelName: gemini-2.5-flash
+      apiKey: "{{ secret('GEMINI_API_KEY') }}"
+    messages:
+      - type: USER
+        content: "{{ inputs.student_question }}"
+
+  - id: ingest_course_docs
+    type: io.kestra.plugin.ai.rag.IngestDocument
+    description: Ingest LLM Zoomcamp README and module introductions
+    provider:
+      type: io.kestra.plugin.ai.provider.GoogleGemini
+      modelName: gemini-embedding-001
+      apiKey: "{{ secret('GEMINI_API_KEY') }}"
+    embeddings:
+      type: io.kestra.plugin.ai.embeddings.KestraKVStore
+    drop: true
+    fromExternalURLs:
+      - https://raw.githubusercontent.com/DataTalksClub/llm-zoomcamp/main/README.md
+      - https://raw.githubusercontent.com/DataTalksClub/llm-zoomcamp/main/01-intro/README.md
+
+  - id: rag_answer
+    type: io.kestra.plugin.ai.rag.ChatCompletion
+    description: Answer using retrieved course documentation
+    chatProvider:
+      type: io.kestra.plugin.ai.provider.GoogleGemini
+      modelName: gemini-2.5-flash
+      apiKey: "{{ secret('GEMINI_API_KEY') }}"
+    embeddingProvider:
+      type: io.kestra.plugin.ai.provider.GoogleGemini
+      modelName: gemini-embedding-001
+      apiKey: "{{ secret('GEMINI_API_KEY') }}"
+    embeddings:
+      type: io.kestra.plugin.ai.embeddings.KestraKVStore
+    systemMessage: |
+      You are a helpful assistant for DataTalks.Club course participants.
+      Answer questions accurately and concisely using only the provided course
+      documentation. If the answer is not in the context, say so clearly rather
+      than guessing.
+    prompt: "{{ inputs.student_question }}"
+
+  - id: log_comparison
+    type: io.kestra.plugin.core.log.Log
+    message: |
+      📚 DataTalks.Club LLM Zoomcamp FAQ Assistant
+      =============================================
+      ❓ Question: {{ inputs.student_question }}
+
+      ❌ Without course context (generic answer):
+      {{ outputs.baseline_answer.textOutput }}
+
+      ✅ With course documentation (RAG answer):
+      {{ outputs.rag_answer.textOutput }}
+
+      📊 RAG tokens used: {{ outputs.rag_answer.tokenUsage.totalTokenCount }}
+
+      💡 Notice how RAG grounds the answer in actual course policies instead
+         of generic advice. The same pattern powers the Python pipeline in
+         rag-vector.ipynb and rag_helper.py in this repository.

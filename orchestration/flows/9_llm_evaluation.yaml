@@ -1,0 +1,137 @@
+id: 9_llm_evaluation
+namespace: zoomcamp
+
+description: |
+  This flow demonstrates automated LLM quality evaluation using the
+  "LLM-as-judge" pattern — a third LLM objectively scores two responses
+  (with RAG vs. without RAG) on accuracy, relevance, and specificity.
+
+  Key concepts:
+  - LLM-as-judge: using an LLM to evaluate other LLM outputs
+  - Structured JSON output from the judge for machine-readable results
+  - Automating quality checks across RAG pipeline variants
+
+  This is the foundation of production LLM monitoring. Schedule it after
+  every knowledge-base refresh (see 10_scheduled_knowledge_refresh.yaml)
+  to catch regressions before they reach users.
+
+inputs:
+  - id: eval_question
+    type: STRING
+    displayName: Evaluation question
+    defaults: "Which features were released in Kestra 1.1?"
+
+tasks:
+  - id: ingest_docs
+    type: io.kestra.plugin.ai.rag.IngestDocument
+    description: Ingest Kestra 1.1 release notes for the RAG candidate
+    provider:
+      type: io.kestra.plugin.ai.provider.GoogleGemini
+      modelName: gemini-embedding-001
+      apiKey: "{{ secret('GEMINI_API_KEY') }}"
+    embeddings:
+      type: io.kestra.plugin.ai.embeddings.KestraKVStore
+    drop: true
+    fromExternalURLs:
+      - https://raw.githubusercontent.com/kestra-io/docs/refs/heads/main/src/contents/blogs/release-1-1/index.md
+
+  - id: answer_without_rag
+    type: io.kestra.plugin.ai.completion.ChatCompletion
+    description: Candidate A — baseline answer with no retrieved context
+    provider:
+      type: io.kestra.plugin.ai.provider.GoogleGemini
+      modelName: gemini-2.5-flash
+      apiKey: "{{ secret('GEMINI_API_KEY') }}"
+    messages:
+      - type: USER
+        content: "{{ inputs.eval_question }}"
+
+  - id: answer_with_rag
+    type: io.kestra.plugin.ai.rag.ChatCompletion
+    description: Candidate B — answer grounded in ingested release notes
+    chatProvider:
+      type: io.kestra.plugin.ai.provider.GoogleGemini
+      modelName: gemini-2.5-flash
+      apiKey: "{{ secret('GEMINI_API_KEY') }}"
+    embeddingProvider:
+      type: io.kestra.plugin.ai.provider.GoogleGemini
+      modelName: gemini-embedding-001
+      apiKey: "{{ secret('GEMINI_API_KEY') }}"
+    embeddings:
+      type: io.kestra.plugin.ai.embeddings.KestraKVStore
+    systemMessage: |
+      You are a helpful Kestra assistant. Answer using the provided documentation only.
+    prompt: "{{ inputs.eval_question }}"
+
+  - id: judge_agent
+    type: io.kestra.plugin.ai.agent.AIAgent
+    description: LLM-as-judge — scores both candidates and picks a winner
+    provider:
+      type: io.kestra.plugin.ai.provider.GoogleGemini
+      modelName: gemini-2.5-flash
+      apiKey: "{{ secret('GEMINI_API_KEY') }}"
+    systemMessage: |
+      You are an objective LLM evaluator. Score two answers to the same question
+      on three dimensions (1–5 each): accuracy, relevance, and specificity.
+      Output ONLY a valid JSON object — no markdown, no code fences, no commentary.
+    prompt: |
+      Question: "{{ inputs.eval_question }}"
+
+      Answer A (no RAG context):
+      "{{ outputs.answer_without_rag.textOutput }}"
+
+      Answer B (with RAG context):
+      "{{ outputs.answer_with_rag.textOutput }}"
+
+      Return this exact JSON structure with integer scores only:
+      {
+        "answer_a": {
+          "accuracy": 0,
+          "relevance": 0,
+          "specificity": 0,
+          "total": 0,
+          "summary": "one sentence assessment"
+        },
+        "answer_b": {
+          "accuracy": 0,
+          "relevance": 0,
+          "specificity": 0,
+          "total": 0,
+          "summary": "one sentence assessment"
+        },
+        "winner": "A or B",
+        "reasoning": "one sentence explaining the winner"
+      }
+
+  - id: log_evaluation_report
+    type: io.kestra.plugin.core.log.Log
+    message: |
+      🏆 LLM Evaluation Report
+      =========================
+      ❓ Question: {{ inputs.eval_question }}
+
+      ❌ Answer A — No RAG:
+      - Accuracy:    {{ json(outputs.judge_agent.textOutput).answer_a.accuracy }}/5
+      - Relevance:   {{ json(outputs.judge_agent.textOutput).answer_a.relevance }}/5
+      - Specificity: {{ json(outputs.judge_agent.textOutput).answer_a.specificity }}/5
+      - Total:       {{ json(outputs.judge_agent.textOutput).answer_a.total }}/15
+      - Assessment:  {{ json(outputs.judge_agent.textOutput).answer_a.summary }}
+
+      ✅ Answer B — With RAG:
+      - Accuracy:    {{ json(outputs.judge_agent.textOutput).answer_b.accuracy }}/5
+      - Relevance:   {{ json(outputs.judge_agent.textOutput).answer_b.relevance }}/5
+      - Specificity: {{ json(outputs.judge_agent.textOutput).answer_b.specificity }}/5
+      - Total:       {{ json(outputs.judge_agent.textOutput).answer_b.total }}/15
+      - Assessment:  {{ json(outputs.judge_agent.textOutput).answer_b.summary }}
+
+      🥇 Winner: {{ json(outputs.judge_agent.textOutput).winner }}
+      📝 Reasoning: {{ json(outputs.judge_agent.textOutput).reasoning }}
+
+      📊 Total tokens used:
+      - answer_without_rag: {{ outputs.answer_without_rag.tokenUsage.totalTokenCount }}
+      - answer_with_rag:    {{ outputs.answer_with_rag.tokenUsage.totalTokenCount }}
+      - judge:              {{ outputs.judge_agent.tokenUsage.totalTokenCount }}
+
+      💡 Run this flow with different eval_question inputs to build a full
+         evaluation dataset. Schedule it after every knowledge-base refresh
+         (10_scheduled_knowledge_refresh.yaml) to catch quality regressions!

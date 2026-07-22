@@ -30,7 +30,7 @@ on. Open it first.
 | 6 | `sqlitesearch-vector.ipynb` | Open the persisted `faq_vectors2.db` and run SQLite-backed RAG |
 | 7 | `pgvector-vector.ipynb` | PostgreSQL + pgvector backend; HNSW index; pgvector RAG |
 | 8 | `main.py` | Minimal CLI entry-point placeholder |
-| 9 | `orchestration/` | Kestra workflow orchestration: docker-compose, 6 YAML flows, 9 lesson notes |
+| 9 | `orchestration/` | Kestra workflow orchestration: docker-compose, 11 YAML flows, 12 lesson notes |
 
 ### Dependency graph
 
@@ -124,7 +124,12 @@ Kestra-based orchestration layer:
 - `flows/4_simple_agent.yaml` — parameterised summarisation agent with token tracking
 - `flows/5_web_research_agent.yaml` — agent with web-search tool
 - `flows/6_multi_agent_research.yaml` — multi-agent collaboration
-- `lessons/` — nine markdown notes (`01-intro.md` … `09-next-steps.md`)
+- `flows/7_conversational_agent_with_memory.yaml` — persistent memory across executions
+- `flows/8_faq_rag_pipeline.yaml` — domain RAG over DataTalks.Club course docs
+- `flows/9_llm_evaluation.yaml` — LLM-as-judge evaluation (RAG vs. no-RAG scoring)
+- `flows/10_scheduled_knowledge_refresh.yaml` — weekly scheduled ingest + smoke test
+- `flows/11_rag_with_groq.yaml` — same RAG pipeline via Gemini and Groq side-by-side
+- `lessons/` — twelve markdown notes (`01-intro.md` … `12-advanced-patterns.md`)
 
 ---
 
@@ -158,7 +163,8 @@ OPENAI_API_KEY=<your-key>
 # For orchestration/docker-compose.yml:
 SECRET_GEMINI_API_KEY=<your-key>
 SECRET_TAVILY_API_KEY=<your-key>
-SECRET_GROQ_API_KEY=<your-key>
+SECRET_GROQ_API_KEY=<your-key>     # flows 7, 11 — free at console.groq.com
+SECRET_OPENAI_API_KEY=<your-key>
 ```
 
 ---

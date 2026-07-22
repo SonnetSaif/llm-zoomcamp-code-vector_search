@@ -1,0 +1,97 @@
+id: 11_rag_with_groq
+namespace: zoomcamp
+
+description: |
+  This flow demonstrates provider flexibility by running the same RAG pipeline
+  with two different inference backends — Gemini and Groq (Llama 3) — then
+  comparing their responses side by side.
+
+  Key concepts:
+  - Swapping the chat provider without changing retrieval or prompt logic
+  - Embeddings stay on Gemini; only inference is switched to Groq/Llama
+  - Token usage and latency differ significantly across providers
+
+  This mirrors the Python notebooks in this repository (pgvector-vector.ipynb,
+  rag-vector.ipynb) where the same vector search layer feeds different LLMs.
+
+  Prerequisite: add your Groq API key as an environment variable before
+  starting Kestra:
+    export SECRET_GROQ_API_KEY=$(echo -n "your-groq-api-key" | base64)
+  Get a free key at https://console.groq.com/
+
+inputs:
+  - id: question
+    type: STRING
+    displayName: Question to answer with both providers
+    defaults: "Which features were released in Kestra 1.1?"
+
+tasks:
+  - id: ingest_docs
+    type: io.kestra.plugin.ai.rag.IngestDocument
+    description: Ingest Kestra 1.1 release notes (shared by both inference tasks)
+    provider:
+      type: io.kestra.plugin.ai.provider.GoogleGemini
+      modelName: gemini-embedding-001
+      apiKey: "{{ secret('GEMINI_API_KEY') }}"
+    embeddings:
+      type: io.kestra.plugin.ai.embeddings.KestraKVStore
+    drop: true
+    fromExternalURLs:
+      - https://raw.githubusercontent.com/kestra-io/docs/refs/heads/main/src/contents/blogs/release-1-1/index.md
+
+  - id: gemini_answer
+    type: io.kestra.plugin.ai.rag.ChatCompletion
+    description: RAG answer using Gemini 2.5 Flash as the inference model
+    chatProvider:
+      type: io.kestra.plugin.ai.provider.GoogleGemini
+      modelName: gemini-2.5-flash
+      apiKey: "{{ secret('GEMINI_API_KEY') }}"
+    embeddingProvider:
+      type: io.kestra.plugin.ai.provider.GoogleGemini
+      modelName: gemini-embedding-001
+      apiKey: "{{ secret('GEMINI_API_KEY') }}"
+    embeddings:
+      type: io.kestra.plugin.ai.embeddings.KestraKVStore
+    systemMessage: |
+      You are a helpful Kestra assistant. Answer concisely using the documentation provided.
+    prompt: "{{ inputs.question }}"
+
+  - id: groq_answer
+    type: io.kestra.plugin.ai.rag.ChatCompletion
+    description: Same RAG answer using Groq (Llama 3.3 70B) as the inference model
+    chatProvider:
+      type: io.kestra.plugin.ai.provider.Groq
+      modelName: llama-3.3-70b-versatile
+      apiKey: "{{ secret('GROQ_API_KEY') }}"
+    embeddingProvider:
+      type: io.kestra.plugin.ai.provider.GoogleGemini
+      modelName: gemini-embedding-001
+      apiKey: "{{ secret('GEMINI_API_KEY') }}"
+    embeddings:
+      type: io.kestra.plugin.ai.embeddings.KestraKVStore
+    systemMessage: |
+      You are a helpful Kestra assistant. Answer concisely using the documentation provided.
+    prompt: "{{ inputs.question }}"
+
+  - id: log_comparison
+    type: io.kestra.plugin.core.log.Log
+    message: |
+      🔀 Multi-Provider RAG Comparison
+      ==================================
+      ❓ Question: {{ inputs.question }}
+
+      🔵 Gemini 2.5 Flash:
+      {{ outputs.gemini_answer.textOutput }}
+      📊 Tokens: {{ outputs.gemini_answer.tokenUsage.totalTokenCount }}
+
+      🟠 Groq — Llama 3.3 70B:
+      {{ outputs.groq_answer.textOutput }}
+      📊 Tokens: {{ outputs.groq_answer.tokenUsage.totalTokenCount }}
+
+      💡 Both answers use the same embeddings and retrieved context — only
+         the inference model differs. Notice any differences in style,
+         verbosity, or accuracy?
+      💡 The same swap works for agents in 4_simple_agent.yaml and
+         5_web_research_agent.yaml — just change the provider block.
+      💡 See the full provider list:
+         https://kestra.io/plugins/plugin-ai/provider
