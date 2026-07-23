@@ -131,6 +131,19 @@ Kestra-based orchestration layer:
 - `flows/11_rag_with_groq.yaml` — same RAG pipeline via Gemini and Groq side-by-side
 - `lessons/` — twelve markdown notes (`01-intro.md` … `12-advanced-patterns.md`)
 
+#### Flow instruction docs (YAML → Markdown)
+- `flows/1_chat_without_rag.yaml` → `flows/1_chat_without_rag.md`
+- `flows/2_chat_with_rag.yaml` → `flows/2_chat_with_rag.md`
+- `flows/3_rag_with_websearch.yaml` → `flows/3_rag_with_websearch.md`
+- `flows/4_simple_agent.yaml` → `flows/4_simple_agent.md`
+- `flows/5_web_research_agent.yaml` → `flows/5_web_research_agent.md`
+- `flows/6_multi_agent_research.yaml` → `flows/6_multi_agent_research.md`
+- `flows/7_conversational_agent_with_memory.yaml` → `flows/7_conversational_agent_with_memory.md`
+- `flows/8_faq_rag_pipeline.yaml` → `flows/8_faq_rag_pipeline.md`
+- `flows/9_llm_evaluation.yaml` → `flows/9_llm_evaluation.md`
+- `flows/10_scheduled_knowledge_refresh.yaml` → `flows/10_scheduled_knowledge_refresh.md`
+- `flows/11_rag_with_groq.yaml` → `flows/11_rag_with_groq.md`
+
 ---
 
 ## How to run
